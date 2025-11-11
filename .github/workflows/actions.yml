@@ -21,58 +21,64 @@ jobs:
     
     env:
       ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID}}.dkr.ecr.us-west-2.amazonaws.com
-      ECR_REPO: tryan/appdemo
+      ECR_REPO: mycontainer/demo
       GITHUB_SHA: ${{ github.sha }}
     
     steps:
     - name: Checkout
       uses: actions/checkout@v4
       
-    # - name: Run FCS IaC Scan
-    #   uses: crowdstrike/fcs-action@v1.0.6
-    #   id: fcs
-    #   with:
-    #     falcon_client_id: ${{ secrets.FALCON_CLIENT_ID }}
-    #     falcon_region: 'us-1'
-    #     path: '.'
-    #     report_formats: 'sarif'
-    #     upload_results: true
-    #     output_path: '.'
-    #   env:
-    #     FALCON_CLIENT_SECRET: ${{ secrets.FALCON_CLIENT_SECRET }}
+    - name: Run FCS IaC Scan
+      uses: crowdstrike/fcs-action@v2.0.2
+      id: fcsiac
+      with:
+        falcon_client_id: ${{ secrets.FALCON_CLIENT_ID }}
+        falcon_region: 'us-1'
+        path: '.'
+        report_formats: 'sarif'
+        upload_results: true
+        scan_type: iac
+        output_path: './scan-results/'
+        version: 2.1.5
+      env:
+        FALCON_CLIENT_SECRET: ${{ secrets.FALCON_CLIENT_SECRET }}
 
-    # - name: Copy SARIF file to a static filename
-    #   if: always()
-    #   run: |
-    #     cp *-scan-results.sarif scan-results.sarif
+    - name: Copy SARIF file to a static filename
+      if: always()
+      run: |
+        cp ./scan-results/*-scan-results.sarif ./scan-results/scan-results.sarif
     
-    # - name: Upload SARIF report to GitHub Code scanning
-    #   uses: github/codeql-action/upload-sarif@v3
-    #   if: always()
-    #   with:
-    #     sarif_file: ./scan-results.sarif
+    - name: Upload SARIF report to GitHub Code scanning
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: ./scan-results/scan-results.sarif
+        category: "fcs_iac_scanning"
     
     - name: Docker build & tag image
       run: |
-        docker build -t $ECR_REGISTRY/$ECR_REPO:$GITHUB_SHA -t $ECR_REGISTRY/$ECR_REPO:latest .
+        docker build -t ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPO }}:${{ env.GITHUB_SHA }} -t ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPO }}:latest .
 
-    - name: Scan Container Image with CrowdStrike
-      uses: CrowdStrike/container-image-scan-action@main
+    - name: Scan Container Image
+      uses: crowdstrike/fcs-action@v2.0.2
+      id: fcsimagescan
       with:
-        container_repository: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPO }}
-        container_tag: ${{ env.GITHUB_SHA }}
-        crowdstrike_region: us-1
-        crowdstrike_score: 500
-        retry_count: 30
+        falcon_client_id: ${{ secrets.FALCON_CLIENT_ID }}
+        falcon_region: 'us-1'
+        scan_type: image
+        image: "${{ env.ECR_REGISTRY }}/${{ env.ECR_REPO }}:${{ env.GITHUB_SHA }}"
+        output_path: './image-scan-results/imagescanresults.sarif'
+        report_formats: sarif
+        version: 2.1.5
       env:
         FALCON_CLIENT_SECRET: ${{ secrets.FALCON_CLIENT_SECRET }}
-        FALCON_CLIENT_ID: ${{ secrets.FALCON_CLIENT_ID }}
-        JSON_REPORT: /tmp/report.json
 
-    - name: Print CrowdStrike Full Image Scan Report
+    - name: Upload SARIF report to GitHub Code scanning
+      uses: github/codeql-action/upload-sarif@v3
       if: always()
-      run: |
-        jq '.' /tmp/report.json
+      with:
+        sarif_file: './image-scan-results/imagescanresults.sarif'
+        category: 'fcs_image_scanning'
 
     # - name: ECR Login
     #   uses: aws-actions/amazon-ecr-login@v2
